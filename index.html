@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Virtual Air Harp | RosseStudio</title>
+
+  <!-- Memuat Library MediaPipe Hands & Drawing Utils versi Web -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    body {
+      background-color: #0a0a0a;
+      color: #f5f5f5;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+    /* Header Glassmorphism senada dengan tema RosseStudio */
+    .hud-header {
+      position: fixed;
+      top: 16px;
+      left: 20px;
+      right: 20px;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      background: rgba(10, 10, 10, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 51, 51, 0.35);
+      border-radius: 14px;
+    }
+    .hud-title h1 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #ff3333;
+      letter-spacing: 0.6px;
+    }
+    .hud-title p {
+      font-size: 0.8rem;
+      color: #cccccc;
+      margin-top: 2px;
+    }
+    .hud-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .badge-status {
+      font-size: 0.8rem;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #ffd700;
+    }
+    .badge-count {
+      font-size: 0.8rem;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: rgba(139, 0, 0, 0.35);
+      border: 1px solid rgba(255, 51, 51, 0.4);
+      color: #ff9999;
+    }
+    button {
+      background: linear-gradient(135deg, #8b0000, #ff3333);
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    button:hover {
+      opacity: 0.9;
+      transform: scale(1.03);
+    }
+    button.btn-clear {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .stage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+    /* Jangan gunakan display:none agar browser tetap merender frame kamera */
+    video {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    #start-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      background: rgba(10, 10, 10, 0.92);
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+    #start-screen h2 {
+      font-size: 1.9rem;
+      color: #ff3333;
+      margin-bottom: 10px;
+      text-shadow: 0 0 18px rgba(255, 51, 51, 0.5);
+    }
+    #start-screen p {
+      max-width: 480px;
+      font-size: 0.95rem;
+      color: #cccccc;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+    #btn-start {
+      font-size: 1rem;
+      padding: 12px 28px;
+      box-shadow: 0 0 24px rgba(255, 51, 51, 0.45);
+    }
+    @media (max-width: 640px) {
+      .hud-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Overlay Awal -->
+  <div id="start-screen">
+    <h2>Virtual Air Harp</h2>
+    <p>
+      Cubit ujung jempol dan telunjuk kedua tangan secara bersamaan untuk menarik senar cahaya di udara, lalu geser telunjukmu untuk memetik nadanya.
+    </p>
+    <button id="btn-start">Aktifkan Kamera & Audio</button>
+  </div>
+
+  <!-- Navigasi & Status -->
+  <div class="hud-header">
+    <div class="hud-title">
+      <h1>VIRTUAL AIR HARP &bull; ROSSESTUDIO</h1>
+      <p>Cubit 2 tangan: Buat Senar &bull; Petik: Mainkan &bull; Tombol 'C': Hapus</p>
+    </div>
+    <div class="hud-actions">
+      <span class="badge-status" id="ai-status">Menunggu Kamera...</span>
+      <span class="badge-count" id="string-counter">Senar: 0</span>
+      <button class="btn-clear" id="btn-clear">Hapus Semua (C)</button>
+    </div>
+  </div>
+
+  <!-- Area Kamera & Kanvas Visual -->
+  <div class="stage">
+    <video id="input_video" autoplay playsinline muted></video>
+    <canvas id="output_canvas"></canvas>
+  </div>
+
+  <script>
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const ctx = canvasElement.getContext('2d');
+    const startScreen = document.getElementById('start-screen');
+    const btnStart = document.getElementById('btn-start');
+    const btnClear = document.getElementById('btn-clear');
+    const stringCounter = document.getElementById('string-counter');
+    const aiStatus = document.getElementById('ai-status');
+
+    // ==========================================
+    // 1. INISIALISASI AUDIO & GENERATOR NADA
+    // ==========================================
+    let audioCtx = null;
+    const PENTATONIC_FREQS = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00];
+
+    function playHarpSound(freq, duration = 1.2) {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+
+      const now = audioCtx.currentTime;
+      const masterGain = audioCtx.createGain();
+
+      masterGain.gain.setValueAtTime(0.001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.5, now + 0.015);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      masterGain.connect(audioCtx.destination);
+
+      const harmonics = [
+        { mult: 1, weight: 0.6 },
+        { mult: 2, weight: 0.3 },
+        { mult: 3, weight: 0.1 }
+      ];
+
+      harmonics.forEach(h => {
+        const osc = audioCtx.createOscillator();
+        const oscGain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq * h.mult, now);
+        oscGain.gain.setValueAtTime(h.weight, now);
+
+        osc.connect(oscGain);
+        oscGain.connect(masterGain);
+        osc.start(now);
+        osc.stop(now + duration + 0.05);
+      });
+    }
+
+    // ==========================================
+    // 2. VARIABEL PENYIMPANAN DATA (STATE)
+    // ==========================================
+    let strings = [];
+    let particles = [];
+    let prevTips = {};
+    let latestLandmarks = [];
+    let isDrawing = false;
+    let tempP1 = null;
+    let tempP2 = null;
+    let isProcessingAI = false;
+    let aiReady = false;
+
+    const NEON_COLORS = [
+      'rgb(100, 255, 255)', // Cyan terang
+      'rgb(255, 100, 255)', // Magenta / Pink neon
+      'rgb(180, 255, 100)', // Hijau mint neon
+      'rgb(255, 220, 100)'  // Kuning emas
+    ];
+
+    function updateCounter() {
+      stringCounter.textContent = `Senar: ${strings.length}`;
+    }
+
+    function getDistance(p1, p2) {
+      return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    }
+
+    function ccw(A, B, C) {
+      return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+    }
+
+    function isIntersecting(A, B, C, D) {
+      return ccw(A, C, D) !== ccw(B, C, D) && ccw(A, B, C) !== ccw(A, B, D);
+    }
+
+    function spawnSparks(x, y, color) {
+      for (let i = 0; i < 25; i++) {
+        const angle = Math.random() * 2 * Math.PI;
+        const speed = 2 + Math.random() * 6;
+        particles.push({
+          x: x,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: Math.floor(15 + Math.random() * 11),
+          color: color
+        });
+      }
+    }
+
+    function drawStringWithTicks(s) {
+      const { p1, p2, color, vibrate } = s;
+      const length = getDistance(p1, p2);
+      if (length === 0) return;
+
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur = vibrate > 0 ? 25 : 14;
+
+      if (vibrate > 0) {
+        const dx = (p2.x - p1.x) / length;
+        const dy = (p2.y - p1.y) / length;
+        const nx = -dy;
+        const ny = dx;
+        const steps = 25;
+
+        ctx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const bx = p1.x + (p2.x - p1.x) * t;
+          const by = p1.y + (p2.y - p1.y) * t;
+          const offset = Math.sin(t * Math.PI) * Math.sin(vibrate * 1.5) * (vibrate * 1.2);
+          const px = bx + nx * offset;
+          const py = by + ny * offset;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 8;
+        ctx.stroke();
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        s.vibrate -= 1;
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        const dx = (p2.x - p1.x) / length;
+        const dy = (p2.y - p1.y) / length;
+        const nx = -dy;
+        const ny = dx;
+        const numTicks = Math.floor(length / 25);
+
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.lineWidth = 1;
+
+        for (let i = 1; i < numTicks; i++) {
+          const tx = p1.x + dx * (i * 25);
+          const ty = p1.y + dy * (i * 25);
+          const tickLen = (i % 2 === 0) ? 8 : 4;
+          ctx.beginPath();
+          ctx.moveTo(tx, ty);
+          ctx.lineTo(tx + nx * tickLen, ty + ny * tickLen);
+          ctx.stroke();
+        }
+      }
+
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(p1.x, p1.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(p2.x, p2.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // ==========================================
+    // 3. INISIALISASI MEDIAPIPE HANDS
+    // ==========================================
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
+    });
+
+    hands.onResults((results) => {
+      latestLandmarks = results.multiHandLandmarks || [];
+      if (!aiReady) {
+        aiReady = true;
+        aiStatus.textContent = 'AI Tangan Aktif';
+        aiStatus.style.color = '#66ff99';
+      }
+    });
+
+    // ==========================================
+    // 4. LOOP RENDER UTAMA (LANGSUNG TAMPILKAN KAMERA)
+    // ==========================================
+    function renderLoop() {
+      if (videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
+        const w = videoElement.videoWidth;
+        const h = videoElement.videoHeight;
+
+        if (canvasElement.width !== w || canvasElement.height !== h) {
+          canvasElement.width = w;
+          canvasElement.height = h;
+        }
+
+        const scaleFactor = w / 1280;
+        const pinchThreshold = 45 * scaleFactor;
+        const minStringLen = 50 * scaleFactor;
+        const maxJumpDist = 250 * scaleFactor;
+
+        // Gambar feed webcam secara langsung dengan efek cermin
+        ctx.save();
+        ctx.clearRect(0, 0, w, h);
+        ctx.translate(w, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(videoElement, 0, 0, w, h);
+        ctx.restore();
+
+        // Kirim frame ke MediaPipe secara asinkron tanpa menahan gambar kamera
+        if (!isProcessingAI) {
+          isProcessingAI = true;
+          hands.send({ image: videoElement })
+            .catch((err) => {
+              console.error('MediaPipe error:', err);
+              aiStatus.textContent = 'AI Gagal Dimuat';
+              aiStatus.style.color = '#ff5555';
+            })
+            .finally(() => {
+              isProcessingAI = false;
+            });
+        }
+
+        let pinchPoints = [];
+        let currentTips = {};
+
+        // Gambar kerangka tangan & deteksi cubitan dari hasil AI terbaru
+        latestLandmarks.forEach((handLandmarks, idx) => {
+          const mirrored = handLandmarks.map(lm => ({
+            x: 1 - lm.x,
+            y: lm.y,
+            z: lm.z
+          }));
+
+          drawConnectors(ctx, mirrored, HAND_CONNECTIONS, { color: '#00ff00', lineWidth: 2 });
+          drawLandmarks(ctx, mirrored, { color: '#ff0000', lineWidth: 1, radius: 3 });
+
+          const thumb = { x: mirrored[4].x * w, y: mirrored[4].y * h };
+          const index = { x: mirrored[8].x * w, y: mirrored[8].y * h };
+
+          currentTips[idx] = index;
+
+          if (getDistance(thumb, index) < pinchThreshold) {
+            pinchPoints.push(index);
+            ctx.beginPath();
+            ctx.arc(index.x, index.y, 10, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ffff00';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+          }
+        });
+
+        // Logika membuat senar baru saat 2 tangan mencubit
+        if (pinchPoints.length === 2) {
+          isDrawing = true;
+          tempP1 = pinchPoints[0];
+          tempP2 = pinchPoints[1];
+
+          ctx.beginPath();
+          ctx.moveTo(tempP1.x, tempP1.y);
+          ctx.lineTo(tempP2.x, tempP2.y);
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        } else {
+          if (isDrawing && tempP1 && tempP2) {
+            const length = getDistance(tempP1, tempP2);
+            if (length > minStringLen) {
+              const normLen = Math.min(Math.max((length - minStringLen) / (550 * scaleFactor), 0.0), 0.99);
+              const soundIdx = Math.max(0, Math.min(Math.floor((1.0 - normLen) * PENTATONIC_FREQS.length), PENTATONIC_FREQS.length - 1));
+
+              strings.push({
+                p1: { ...tempP1 },
+                p2: { ...tempP2 },
+                vibrate: 0,
+                color: NEON_COLORS[Math.floor(Math.random() * NEON_COLORS.length)],
+                soundIdx: soundIdx
+              });
+              updateCounter();
+            }
+            isDrawing = false;
+          }
+        }
+
+        // Proses petikan & gambar semua senar
+        strings.forEach(s => {
+          Object.keys(currentTips).forEach(handIdx => {
+            if (prevTips[handIdx]) {
+              const prevPos = prevTips[handIdx];
+              const currPos = currentTips[handIdx];
+
+              if (
+                isIntersecting(prevPos, currPos, s.p1, s.p2) &&
+                getDistance(prevPos, currPos) < maxJumpDist &&
+                s.vibrate < 10
+              ) {
+                s.vibrate = 18;
+                playHarpSound(PENTATONIC_FREQS[s.soundIdx]);
+                spawnSparks(currPos.x, currPos.y, s.color);
+              }
+            }
+          });
+
+          drawStringWithTicks(s);
+        });
+
+        // Update & gambar partikel percikan cahaya
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.25;
+          p.life -= 1;
+
+          if (p.life <= 0) {
+            particles.splice(i, 1);
+          } else {
+            ctx.save();
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+
+        prevTips = { ...currentTips };
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+
+    // ==========================================
+    // 5. AKSES KAMERA NATIVE BROWSER
+    // ==========================================
+    async function startCameraAndAudio() {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        startScreen.style.display = 'none';
+        aiStatus.textContent = 'Membuka Kamera...';
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        videoElement.srcObject = stream;
+        await videoElement.play();
+
+        aiStatus.textContent = 'Memuat Model AI...';
+        requestAnimationFrame(renderLoop);
+      } catch (err) {
+        console.error('Gagal akses kamera:', err);
+        aiStatus.textContent = 'Kamera Gagal: ' + err.message;
+        aiStatus.style.color = '#ff5555';
+      }
+    }
+
+    function clearAllStrings() {
+      strings = [];
+      updateCounter();
+    }
+
+    btnStart.addEventListener('click', startCameraAndAudio);
+    btnClear.addEventListener('click', clearAllStrings);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'c') {
+        clearAllStrings();
+      }
+    });
+  </script>
+</body>
+</html>
